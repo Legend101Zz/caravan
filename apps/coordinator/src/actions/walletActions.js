@@ -34,6 +34,7 @@ export const WALLET_MODES = {
   DEPOSIT: 1,
   SPEND: 2,
   TRANSACTIONS: 3, // new mode to view both confirmed and pending txs
+  ACCELERATE: 4,
 };
 
 export function updateDepositSliceAction(value) {

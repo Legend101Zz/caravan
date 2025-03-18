@@ -18,6 +18,7 @@ import WalletDeposit from "./WalletDeposit";
 import WalletSpend from "./WalletSpend";
 import TransactionsTab from "./TransactionsTab";
 import { SlicesTableContainer } from "../Slices";
+import WalletAccelerator from "./WalletAccelerator";
 
 class WalletControl extends React.Component {
   scrollRef = React.createRef();
@@ -47,6 +48,7 @@ class WalletControl extends React.Component {
               value={WALLET_MODES.TRANSACTIONS}
               key={3}
             />,
+            <Tab label="Accelerate" value={WALLET_MODES.ACCELERATE} key={4} />, // New tab
           ]}
         </Tabs>
         <Box mt={2}>{this.renderModeComponent()}</Box>
@@ -62,6 +64,7 @@ class WalletControl extends React.Component {
         return <WalletSpend addNode={addNode} updateNode={updateNode} />;
       if (walletMode === WALLET_MODES.VIEW) return <SlicesTableContainer />;
       if (walletMode === WALLET_MODES.TRANSACTIONS) return <TransactionsTab />;
+      if (walletMode === WALLET_MODES.ACCELERATE) return <WalletAccelerator />;
     }
     const progress = this.progress();
     return [
