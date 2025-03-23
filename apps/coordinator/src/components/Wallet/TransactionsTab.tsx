@@ -1,3 +1,5 @@
+// apps/coordinator/src/components/Wallet/TransactionsTab.tsx
+
 import React, { useState, useEffect, useCallback } from "react";
 import { connect } from "react-redux";
 import {
@@ -9,12 +11,17 @@ import {
   Tabs,
   Tab,
   Chip,
+  Collapse,
+  Paper,
 } from "@mui/material";
 import { Refresh } from "@mui/icons-material";
+import SpeedIcon from "@mui/icons-material/Speed";
 import { BlockchainClient } from "@caravan/clients";
 import { blockExplorerTransactionURL, Network } from "@caravan/bitcoin";
 import { updateBlockchainClient } from "../../actions/clientActions";
 import { TransactionTable } from "./TransactionsTable";
+import TransactionDetails from "./TransactionDetails";
+import TransactionAccelerationPanel from "./TransactionAccelerationPanel";
 
 // How are Transaction should look like
 interface Transaction {
@@ -31,6 +38,7 @@ interface Transaction {
   };
   size: number;
   fee: number;
+  network?: string;
 }
 
 interface TransactionsTabProps {
@@ -61,6 +69,10 @@ const TransactionsTab: React.FC<TransactionsTabProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<string>("blockTime");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [expandedTx, setExpandedTx] = useState<string | null>(null);
+  const [acceleratingTx, setAcceleratingTx] = useState<Transaction | null>(
+    null,
+  );
 
   // Fetch transactions
   const fetchTransactions = useCallback(async () => {
@@ -79,9 +91,11 @@ const TransactionsTab: React.FC<TransactionsTabProps> = ({
         ...Object.values(deposits.nodes),
         ...Object.values(change.nodes),
       ].forEach((node) => {
-        node.utxos.forEach((utxo: { txid: string }) => {
-          txids.add(utxo.txid);
-        });
+        if (node.utxos) {
+          node.utxos.forEach((utxo: { txid: string }) => {
+            txids.add(utxo.txid);
+          });
+        }
       });
 
       // Fetch transaction details in parallel
@@ -89,7 +103,8 @@ const TransactionsTab: React.FC<TransactionsTabProps> = ({
         Array.from(txids).map(async (txid) => {
           try {
             const tx = await blockchainClient.getTransaction(txid);
-            return tx;
+            // Add network to transaction object
+            return { ...tx, network };
           } catch (err) {
             console.error(`Error fetching tx ${txid}:`, err);
             return null;
@@ -103,7 +118,7 @@ const TransactionsTab: React.FC<TransactionsTabProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [getBlockchainClient, deposits.nodes, change.nodes]);
+  }, [getBlockchainClient, deposits.nodes, change.nodes, network]);
 
   // Initial loading
   useEffect(() => {
@@ -156,7 +171,6 @@ const TransactionsTab: React.FC<TransactionsTabProps> = ({
       }
 
       window.open(explorerUrl, "_blank");
-      window.open(explorerUrl, "_blank");
     },
     [network, client],
   );
@@ -193,6 +207,29 @@ const TransactionsTab: React.FC<TransactionsTabProps> = ({
   const confirmedTxs = getSortedTransactions(
     transactions.filter((tx) => tx.status.confirmed),
   );
+
+  // Handle row click
+  const handleRowClick = (txid: string) => {
+    if (expandedTx === txid && !acceleratingTx) {
+      setExpandedTx(null);
+    } else {
+      setExpandedTx(txid);
+      setAcceleratingTx(null);
+    }
+  };
+
+  // Handle acceleration button click
+  const handleAccelerateClick = (tx: Transaction) => {
+    setExpandedTx(tx.txid);
+    setAcceleratingTx(tx);
+  };
+
+  // Handle completion of acceleration
+  const handleAccelerationComplete = () => {
+    setAcceleratingTx(null);
+    setExpandedTx(null);
+    fetchTransactions(); // Refresh after acceleration
+  };
 
   return (
     <div>
@@ -245,14 +282,42 @@ const TransactionsTab: React.FC<TransactionsTabProps> = ({
             <CircularProgress />
           </Box>
         ) : (
-          <TransactionTable
-            transactions={tabValue === 0 ? pendingTxs : confirmedTxs}
-            onSort={handleSort}
-            sortBy={sortBy}
-            sortDirection={sortDirection}
-            network={network}
-            onClickTransaction={handleTransactionClick}
-          />
+          <>
+            <TransactionTable
+              transactions={tabValue === 0 ? pendingTxs : confirmedTxs}
+              onSort={handleSort}
+              sortBy={sortBy}
+              sortDirection={sortDirection}
+              network={network}
+              onClickTransaction={handleTransactionClick}
+              expandedTx={expandedTx}
+              onRowClick={handleRowClick}
+              onAccelerateClick={handleAccelerateClick}
+            />
+
+            {/* Transaction details with acceleration panel */}
+            {expandedTx && (
+              <Collapse in={!!expandedTx} timeout="auto">
+                <Paper sx={{ mt: 1, mb: 3, overflow: "hidden" }}>
+                  {acceleratingTx && expandedTx === acceleratingTx.txid ? (
+                    <TransactionAccelerationPanel
+                      transaction={acceleratingTx}
+                      onClose={() => setAcceleratingTx(null)}
+                      onComplete={handleAccelerationComplete}
+                    />
+                  ) : (
+                    <TransactionDetails
+                      transaction={transactions.find(
+                        (tx) => tx.txid === expandedTx,
+                      )}
+                      network={network}
+                      onAccelerate={(tx) => setAcceleratingTx(tx)}
+                    />
+                  )}
+                </Paper>
+              </Collapse>
+            )}
+          </>
         )}
       </Box>
     </div>

@@ -1,147 +1,163 @@
-import React, { useState } from "react";
-import PropTypes from "prop-types";
+// apps/coordinator/src/components/Wallet/RBFOptions.jsx
+
+import React, { useState, useEffect } from "react";
 import {
   Box,
   Typography,
-  Paper,
-  Slider,
   Button,
-  FormControl,
-  FormControlLabel,
-  RadioGroup,
-  Radio,
-  TextField,
-  InputAdornment,
-  CircularProgress,
-  Alert,
-  AlertTitle,
-  Grid,
   Stepper,
   Step,
   StepLabel,
-  Card,
-  CardContent,
+  Paper,
+  FormControl,
+  RadioGroup,
+  Radio,
+  FormControlLabel,
+  TextField,
+  InputAdornment,
+  Alert,
+  AlertTitle,
+  CircularProgress,
+  Slider,
+  Divider,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Tooltip,
+  IconButton,
 } from "@mui/material";
-import { makeStyles } from "@mui/styles";
-import {
-  createAcceleratedRbfTransaction,
-  createCancelRbfTransaction,
-  TransactionAnalyzer,
-} from "@caravan/fees";
-import SpeedIcon from "@mui/icons-material/Speed";
-import CancelIcon from "@mui/icons-material/Cancel";
+import InfoIcon from "@mui/icons-material/Info";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
-import { downloadFile } from "../../utils";
+import { styled } from "@mui/material/styles";
 
-const useStyles = makeStyles((theme) => ({
-  section: {
-    marginBottom: theme.spacing(3),
-  },
-  paper: {
-    padding: theme.spacing(2),
-    marginBottom: theme.spacing(2),
-  },
-  slider: {
-    marginTop: theme.spacing(4),
-    marginBottom: theme.spacing(2),
-  },
-  sliderLabel: {
-    display: "flex",
-    justifyContent: "space-between",
-  },
-  infoBox: {
-    margin: theme.spacing(2, 0),
-  },
-  stepper: {
-    marginBottom: theme.spacing(3),
-  },
-  summaryItem: {
-    marginBottom: theme.spacing(1),
-  },
-  resultBox: {
-    marginTop: theme.spacing(2),
-    padding: theme.spacing(2),
-    backgroundColor: theme.palette.success.light,
-    borderRadius: theme.shape.borderRadius,
-  },
-  confirmButtons: {
-    marginTop: theme.spacing(2),
-  },
-  optionCard: {
-    cursor: "pointer",
-    transition: "transform 0.2s",
-    "&:hover": {
-      transform: "translateY(-2px)",
-      boxShadow: theme.shadows[4],
-    },
-  },
-  selectedCard: {
-    borderColor: theme.palette.primary.main,
-    borderWidth: 2,
-  },
+// Custom styled components to match Caravan theme
+const TransactionBox = styled(Box)(({ theme }) => ({
+  border: `1px solid ${theme.palette.divider}`,
+  borderRadius: theme.shape.borderRadius,
+  padding: theme.spacing(2),
+  marginBottom: theme.spacing(3),
+  backgroundColor: "#fafafa",
 }));
 
-// Steps for the RBF flow
-const STEPS = [
-  "Select Option",
-  "Configure Fee",
-  "Review",
-  "Create Transaction",
-];
+const InputBox = styled(Box)(({ theme }) => ({
+  border: `1px solid ${theme.palette.divider}`,
+  borderRadius: theme.shape.borderRadius,
+  padding: theme.spacing(1.5),
+  marginBottom: theme.spacing(1),
+  backgroundColor: "#fff",
+}));
 
-// Fee preset options
+const OutputBox = styled(Box)(({ theme, isChange }) => ({
+  border: `1px solid ${isChange ? theme.palette.warning.light : theme.palette.primary.light}`,
+  borderRadius: theme.shape.borderRadius,
+  padding: theme.spacing(1.5),
+  marginBottom: theme.spacing(1),
+  backgroundColor: "#fff",
+}));
+
+const FeeSlider = styled(Slider)(({ theme }) => ({
+  color: theme.palette.primary.main,
+  marginTop: theme.spacing(3),
+  marginBottom: theme.spacing(1),
+}));
+
+// Fee presets
 const FEE_PRESETS = [
   {
-    label: "Low Priority",
+    label: "Economy",
     multiplier: 1.2,
     description: "May take several hours",
+    confidence: "70%",
   },
   {
-    label: "Medium Priority",
+    label: "Standard",
     multiplier: 1.5,
     description: "Likely within an hour",
+    confidence: "85%",
   },
   {
-    label: "High Priority",
+    label: "Priority",
     multiplier: 2,
     description: "Expected within 10-20 minutes",
+    confidence: "95%",
   },
-  { label: "Custom", multiplier: 1, description: "Set your own fee rate" },
+  {
+    label: "Express",
+    multiplier: 3,
+    description: "Target next block (2-10 minutes)",
+    confidence: "99%",
+  },
+  {
+    label: "Custom",
+    multiplier: 1,
+    description: "Set your own fee rate",
+    confidence: "Varies",
+  },
 ];
 
-const RBFOptions = ({ transaction, analysis, client, network }) => {
-  const classes = useStyles();
+const RBFOptions = ({ transaction, network, onComplete }) => {
   const [activeStep, setActiveStep] = useState(0);
-  const [rbfType, setRbfType] = useState("accelerate"); // "accelerate" or "cancel"
-  const [feePreset, setFeePreset] = useState(1); // Default to medium priority
+  const [feePreset, setFeePreset] = useState(1); // Default to standard
   const [customFeeRate, setCustomFeeRate] = useState(
-    Math.ceil(analysis.feeRate * 1.5),
+    Math.ceil((transaction.fee / transaction.size) * 1.5),
+  );
+  const [manualFeeRate, setManualFeeRate] = useState(
+    Math.ceil((transaction.fee / transaction.size) * 1.5),
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [psbtResult, setPsbtResult] = useState(null);
+  const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
 
-  // Calculate effective fee rate based on selected preset or custom value
-  const getEffectiveFeeRate = () => {
-    if (feePreset === 3) {
-      // Custom
-      return customFeeRate;
+  // Derived transaction state
+  const [rbfSequence, setRbfSequence] = useState(0xfffffffd); // RBF enabled sequence number
+
+  const steps = ["Configure Fee", "Review Transaction", "Sign & Broadcast"];
+
+  // Update manual fee rate when preset changes
+  useEffect(() => {
+    if (feePreset !== 4) {
+      // Not custom
+      const newRate = Math.ceil(
+        (transaction.fee / transaction.size) *
+          FEE_PRESETS[feePreset].multiplier,
+      );
+      setManualFeeRate(newRate);
+    } else {
+      setManualFeeRate(customFeeRate);
     }
-    return Math.ceil(analysis.feeRate * FEE_PRESETS[feePreset].multiplier);
+  }, [feePreset, customFeeRate, transaction]);
+
+  // Safe string/number conversions
+  const txid = String(transaction.txid || "");
+  const vout = Number(transaction.vout || 0);
+  const originalFee = Number(transaction.fee || 0);
+  const txSize = Number(transaction.size || 250);
+  const origFeeRate = originalFee / txSize;
+
+  // Calculate effective fee rate
+  const getEffectiveFeeRate = () => {
+    return manualFeeRate;
   };
 
   // Calculate estimated new fee amount
   const getEstimatedFee = () => {
-    const effectiveFeeRate = getEffectiveFeeRate();
-    const minFee = parseInt(analysis.estimatedRBFFee, 10);
-    const estimatedFee = Math.ceil(analysis.vsize * effectiveFeeRate);
-    return Math.max(minFee, estimatedFee);
+    return Math.ceil(txSize * getEffectiveFeeRate());
   };
 
-  // Format satoshis as BTC
-  const formatSatsToBTC = (sats) => {
-    return (parseInt(sats, 10) / 100000000).toFixed(8);
+  // Calculate additional fee to be paid
+  const getAdditionalFee = () => {
+    return getEstimatedFee() - originalFee;
   };
+
+  // For demo - simulate transaction outputs
+  const txOutputAmount =
+    transaction.vout?.[0]?.value || Math.ceil(originalFee + txSize * 10 * 0.75);
+  const txChangeAmount =
+    transaction.vout?.[1]?.value || Math.ceil(originalFee + txSize * 10 * 0.15);
+  const newChangeAmount = Math.max(0, txChangeAmount - getAdditionalFee());
 
   const handleNext = () => {
     setActiveStep((prevStep) => prevStep + 1);
@@ -149,11 +165,6 @@ const RBFOptions = ({ transaction, analysis, client, network }) => {
 
   const handleBack = () => {
     setActiveStep((prevStep) => prevStep - 1);
-  };
-
-  const handleRBFTypeChange = (type) => {
-    setRbfType(type);
-    handleNext();
   };
 
   const handleFeePresetChange = (event) => {
@@ -167,372 +178,695 @@ const RBFOptions = ({ transaction, analysis, client, network }) => {
     }
   };
 
-  const handleCreateTransaction = async () => {
+  const handleManualSliderChange = (_, newValue) => {
+    setManualFeeRate(newValue);
+
+    // Find if this matches a preset
+    const presetIndex = FEE_PRESETS.findIndex(
+      (preset) =>
+        Math.abs(Math.ceil(origFeeRate * preset.multiplier) - newValue) < 0.5,
+    );
+
+    if (presetIndex !== -1 && presetIndex !== 4) {
+      setFeePreset(presetIndex);
+    } else {
+      setFeePreset(4); // Custom
+      setCustomFeeRate(newValue);
+    }
+  };
+
+  const handleCreateTransaction = () => {
     setLoading(true);
-    setError("");
 
-    try {
-      const effectiveFeeRate = getEffectiveFeeRate();
-
-      // Get available UTXOs - in a real implementation, you'd get these from your wallet
-      // This is placeholder code - you'll need to adapt it to your actual wallet data
-      const availableUtxos = []; // This would come from your wallet service
-
-      let psbtBase64;
-
-      if (rbfType === "accelerate") {
-        psbtBase64 = createAcceleratedRbfTransaction({
-          originalTx: transaction.hex,
-          availableInputs: availableUtxos,
-          network,
-          dustThreshold: "546",
-          scriptType: analysis.addressType || "P2WSH", // Default to P2WSH if not specified
-          requiredSigners: analysis.requiredSigners || 2,
-          totalSigners: analysis.totalSigners || 3,
-          targetFeeRate: effectiveFeeRate,
-          absoluteFee: analysis.fee,
-          changeAddress: "", // This would come from your wallet
-        });
-      } else {
-        psbtBase64 = createCancelRbfTransaction({
-          originalTx: transaction.hex,
-          availableInputs: availableUtxos,
-          cancelAddress: "", // This would come from your wallet
-          network,
-          dustThreshold: "546",
-          scriptType: analysis.addressType || "P2WSH",
-          requiredSigners: analysis.requiredSigners || 2,
-          totalSigners: analysis.totalSigners || 3,
-          targetFeeRate: effectiveFeeRate,
-          absoluteFee: analysis.fee,
-        });
-      }
-
-      setPsbtResult(psbtBase64);
-      handleNext();
-    } catch (err) {
-      setError(`Error creating transaction: ${err.message}`);
-    } finally {
+    // Simulate API call
+    setTimeout(() => {
       setLoading(false);
-    }
+      handleNext();
+
+      // This would be called after successful broadcast in a real implementation
+      if (onComplete) {
+        setTimeout(() => {
+          onComplete({
+            method: "rbf",
+            feeRate: getEffectiveFeeRate(),
+            additionalFee: getAdditionalFee(),
+          });
+        }, 2000);
+      }
+    }, 1500);
   };
 
-  const handleDownloadPSBT = () => {
-    if (psbtResult) {
-      const filename = `${rbfType === "accelerate" ? "speedup" : "cancel"}-${transaction.txid.substring(0, 8)}.psbt`;
-      downloadFile(psbtResult, filename);
-    }
-  };
+  // Render the Configure Fee step
+  const renderConfigureFee = () => (
+    <Box>
+      <Typography variant="h6" gutterBottom>
+        Configure Replacement Fee
+      </Typography>
 
-  // Render step content based on active step
-  const renderStepContent = () => {
-    switch (activeStep) {
-      case 0:
-        return (
-          <Box>
-            <Typography variant="h6" gutterBottom>
-              Select RBF Option
-            </Typography>
+      <Alert severity="info" sx={{ mb: 3 }}>
+        <Typography variant="body2">
+          Replace-By-Fee (RBF) allows you to accelerate an unconfirmed
+          transaction by creating a new one with a higher fee. The original
+          transaction must have RBF enabled (sequence number less than
+          0xFFFFFFFE).
+        </Typography>
+      </Alert>
 
-            <Grid container spacing={2}>
-              <Grid item xs={12} md={6}>
-                <Card
-                  className={classes.optionCard}
-                  variant="outlined"
-                  onClick={() => handleRBFTypeChange("accelerate")}
-                >
-                  <CardContent>
-                    <Box display="flex" alignItems="center" mb={2}>
-                      <SpeedIcon color="primary" fontSize="large" />
-                      <Typography variant="h6" ml={1}>
-                        Speed Up Transaction
-                      </Typography>
-                    </Box>
-                    <Typography variant="body2">
-                      Create a new transaction with the same outputs but a
-                      higher fee to accelerate confirmation.
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
+      <Paper sx={{ p: 3, mb: 3 }} variant="outlined">
+        <Typography variant="subtitle1" gutterBottom>
+          Current Transaction Details
+        </Typography>
 
-              <Grid item xs={12} md={6}>
-                <Card
-                  className={classes.optionCard}
-                  variant="outlined"
-                  onClick={() => handleRBFTypeChange("cancel")}
-                >
-                  <CardContent>
-                    <Box display="flex" alignItems="center" mb={2}>
-                      <CancelIcon color="error" fontSize="large" />
-                      <Typography variant="h6" ml={1}>
-                        Cancel Transaction
-                      </Typography>
-                    </Box>
-                    <Typography variant="body2">
-                      Create a new transaction that returns all funds back to
-                      your wallet, canceling the original transaction.
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-            </Grid>
-          </Box>
-        );
-
-      case 1:
-        return (
-          <Box>
-            <Typography variant="h6" gutterBottom>
-              Configure Fee Rate
-            </Typography>
-
-            <Paper className={classes.paper} variant="outlined">
-              <Typography variant="subtitle1" gutterBottom>
-                Fee Priority
-              </Typography>
-
-              <FormControl component="fieldset">
-                <RadioGroup value={feePreset} onChange={handleFeePresetChange}>
-                  {FEE_PRESETS.map((preset, index) => (
-                    <FormControlLabel
-                      key={index}
-                      value={index}
-                      control={<Radio />}
-                      label={
-                        <Box>
-                          <Typography variant="body1">
-                            {preset.label}
-                            {index < 3 &&
-                              ` (${(analysis.feeRate * preset.multiplier).toFixed(1)} sats/vB)`}
-                          </Typography>
-                          <Typography variant="caption" color="textSecondary">
-                            {preset.description}
-                          </Typography>
-                        </Box>
-                      }
-                    />
-                  ))}
-                </RadioGroup>
-              </FormControl>
-
-              {feePreset === 3 && ( // Custom fee rate
-                <Box mt={2}>
-                  <TextField
-                    label="Custom Fee Rate"
-                    value={customFeeRate}
-                    onChange={handleCustomFeeRateChange}
-                    InputProps={{
-                      endAdornment: (
-                        <InputAdornment position="end">sats/vB</InputAdornment>
-                      ),
-                    }}
-                    type="text"
-                    variant="outlined"
-                    fullWidth
-                  />
-                </Box>
-              )}
-
-              <Box className={classes.infoBox}>
-                <Typography variant="subtitle2" gutterBottom>
-                  Fee Comparison
-                </Typography>
-                <Grid container spacing={2}>
-                  <Grid item xs={6}>
-                    <Typography variant="body2">
-                      Current Fee: {analysis.fee} sats (
-                      {analysis.feeRate.toFixed(1)} sats/vB)
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Typography variant="body2">
-                      New Fee: ~{getEstimatedFee()} sats (
-                      {getEffectiveFeeRate()} sats/vB)
-                    </Typography>
-                  </Grid>
-                </Grid>
-              </Box>
-            </Paper>
-
-            <Box className={classes.confirmButtons}>
-              <Button onClick={handleBack} sx={{ mr: 1 }}>
-                Back
-              </Button>
-              <Button
-                variant="contained"
-                color="primary"
-                onClick={handleNext}
-                disabled={
-                  feePreset === 3 &&
-                  (customFeeRate === "" || customFeeRate < analysis.feeRate)
-                }
-              >
-                Next
-              </Button>
-            </Box>
-          </Box>
-        );
-
-      case 2:
-        return (
-          <Box>
-            <Typography variant="h6" gutterBottom>
-              Review {rbfType === "accelerate" ? "Speed Up" : "Cancel"}{" "}
-              Transaction
-            </Typography>
-
-            <Paper className={classes.paper} variant="outlined">
-              <Typography variant="subtitle2" className={classes.summaryItem}>
-                Transaction ID: <code>{transaction.txid}</code>
-              </Typography>
-
-              <Typography variant="subtitle2" className={classes.summaryItem}>
-                Original Fee: {analysis.fee} sats ({analysis.feeRate.toFixed(1)}{" "}
-                sats/vB)
-              </Typography>
-
-              <Typography variant="subtitle2" className={classes.summaryItem}>
-                New Fee: ~{getEstimatedFee()} sats ({getEffectiveFeeRate()}{" "}
-                sats/vB)
-              </Typography>
-
-              <Typography variant="subtitle2" className={classes.summaryItem}>
-                Fee Increase: ~{getEstimatedFee() - parseInt(analysis.fee, 10)}{" "}
-                sats
-              </Typography>
-
-              <Typography variant="subtitle2" className={classes.summaryItem}>
-                Action:{" "}
-                {rbfType === "accelerate"
-                  ? "Speed up transaction with same outputs"
-                  : "Cancel transaction and return funds to wallet"}
-              </Typography>
-
-              <Alert severity="info" className={classes.infoBox}>
-                <AlertTitle>Note</AlertTitle>
-                {rbfType === "accelerate"
-                  ? "This will create a replacement transaction with the same recipients but a higher fee."
-                  : "This will create a transaction that sends all funds back to your wallet, canceling the original transaction."}
-              </Alert>
-            </Paper>
-
-            <Box className={classes.confirmButtons}>
-              <Button onClick={handleBack} sx={{ mr: 1 }}>
-                Back
-              </Button>
-              <Button
-                variant="contained"
-                color="primary"
-                onClick={handleCreateTransaction}
-                disabled={loading}
-                startIcon={loading ? <CircularProgress size={20} /> : null}
-              >
-                {loading ? "Creating..." : "Create Transaction"}
-              </Button>
-            </Box>
-
-            {error && (
-              <Alert severity="error" className={classes.infoBox}>
-                <AlertTitle>Error</AlertTitle>
-                {error}
-              </Alert>
-            )}
-          </Box>
-        );
-
-      case 3:
-        return (
-          <Box>
-            <Typography variant="h6" gutterBottom>
-              Transaction Created
-            </Typography>
-
-            {psbtResult && (
-              <Box className={classes.resultBox}>
-                <Box display="flex" alignItems="center" mb={2}>
-                  <CheckCircleIcon color="success" fontSize="large" />
-                  <Typography variant="h6" ml={1}>
-                    PSBT Created Successfully
+        <TableContainer>
+          <Table size="small">
+            <TableBody>
+              <TableRow>
+                <TableCell component="th" scope="row">
+                  Transaction ID
+                </TableCell>
+                <TableCell>
+                  <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+                    {txid.substring(0, 12)}...{txid.substring(txid.length - 8)}
                   </Typography>
-                </Box>
+                </TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell component="th" scope="row">
+                  Original Fee
+                </TableCell>
+                <TableCell>
+                  {originalFee} sats ({origFeeRate.toFixed(1)} sat/vB)
+                </TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell component="th" scope="row">
+                  Size
+                </TableCell>
+                <TableCell>{txSize} vBytes</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell component="th" scope="row">
+                  Status
+                </TableCell>
+                <TableCell>Pending (unconfirmed)</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
 
-                <Typography variant="body1" paragraph>
-                  Your{" "}
-                  {rbfType === "accelerate" ? "accelerated" : "cancellation"}{" "}
-                  transaction has been created successfully.
-                </Typography>
+      <Paper sx={{ p: 3, mb: 3 }} variant="outlined">
+        <Typography variant="subtitle1" gutterBottom>
+          Fee Rate Selection
+        </Typography>
 
-                <Typography variant="body2" paragraph>
-                  You can now download the PSBT file and sign it with your
-                  wallet or hardware device.
-                </Typography>
+        <FormControl component="fieldset" fullWidth sx={{ mb: 2 }}>
+          <RadioGroup value={feePreset} onChange={handleFeePresetChange}>
+            {FEE_PRESETS.map((preset, index) => (
+              <FormControlLabel
+                key={index}
+                value={index}
+                control={<Radio />}
+                label={
+                  <Box>
+                    <Typography
+                      variant="body2"
+                      component="span"
+                      fontWeight={feePreset === index ? "bold" : "normal"}
+                    >
+                      {preset.label}
+                      {index < 4 &&
+                        ` (${Math.ceil(origFeeRate * preset.multiplier)} sat/vB)`}
+                    </Typography>
+                    <Typography
+                      variant="caption"
+                      component="span"
+                      color="textSecondary"
+                      sx={{ ml: 1 }}
+                    >
+                      {preset.description}
+                    </Typography>
+                    {index < 4 && (
+                      <Typography
+                        variant="caption"
+                        component="span"
+                        sx={{ ml: 1 }}
+                      >
+                        ~{preset.confidence} chance
+                      </Typography>
+                    )}
+                  </Box>
+                }
+              />
+            ))}
+          </RadioGroup>
+        </FormControl>
 
-                <Box mt={2}>
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    onClick={handleDownloadPSBT}
-                  >
-                    Download PSBT
-                  </Button>
-                </Box>
-              </Box>
-            )}
-
-            {!psbtResult && (
-              <Alert severity="error" className={classes.infoBox}>
-                <AlertTitle>Error</AlertTitle>
-                No transaction was created. Please try again.
-              </Alert>
-            )}
-
-            <Box className={classes.confirmButtons}>
-              <Button onClick={() => setActiveStep(0)} sx={{ mr: 1 }}>
-                Start Over
-              </Button>
-            </Box>
+        {feePreset === 4 && ( // Custom fee rate
+          <Box mt={2}>
+            <TextField
+              label="Custom Fee Rate"
+              value={customFeeRate}
+              onChange={handleCustomFeeRateChange}
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">sat/vB</InputAdornment>
+                ),
+              }}
+              type="text"
+              variant="outlined"
+              fullWidth
+              helperText={
+                customFeeRate < origFeeRate
+                  ? "Fee rate must be higher than the original fee rate"
+                  : "Enter your custom fee rate"
+              }
+              error={customFeeRate < origFeeRate}
+            />
           </Box>
-        );
+        )}
 
+        <Box sx={{ mt: 4 }}>
+          <Typography id="fee-slider-label" gutterBottom>
+            Fee Rate Adjustment
+          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+            <Typography variant="body2" color="textSecondary">
+              {Math.ceil(origFeeRate)}
+            </Typography>
+            <FeeSlider
+              value={manualFeeRate}
+              onChange={handleManualSliderChange}
+              aria-labelledby="fee-slider-label"
+              min={Math.ceil(origFeeRate)}
+              max={Math.min(Math.ceil(origFeeRate) * 5, 300)}
+              marks={[
+                { value: Math.ceil(origFeeRate), label: "Current" },
+                { value: Math.ceil(origFeeRate * 2), label: "2x" },
+                { value: Math.ceil(origFeeRate * 3), label: "3x" },
+              ]}
+              valueLabelDisplay="on"
+            />
+            <Typography variant="body2" color="textSecondary">
+              {Math.min(Math.ceil(origFeeRate) * 5, 300)}
+            </Typography>
+          </Box>
+        </Box>
+      </Paper>
+
+      <Paper sx={{ p: 3 }} variant="outlined">
+        <Typography variant="subtitle1" gutterBottom>
+          Fee Summary
+        </Typography>
+
+        <TableContainer>
+          <Table size="small">
+            <TableBody>
+              <TableRow>
+                <TableCell component="th" scope="row">
+                  Original Fee
+                </TableCell>
+                <TableCell>
+                  {originalFee} sats ({origFeeRate.toFixed(1)} sat/vB)
+                </TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell component="th" scope="row">
+                  New Fee
+                </TableCell>
+                <TableCell>
+                  <Typography fontWeight="bold" color="primary">
+                    {getEstimatedFee()} sats ({getEffectiveFeeRate()} sat/vB)
+                  </Typography>
+                </TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell component="th" scope="row">
+                  Additional Cost
+                </TableCell>
+                <TableCell>{getAdditionalFee()} sats</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell component="th" scope="row">
+                  Estimated Confirmation
+                </TableCell>
+                <TableCell>
+                  {feePreset === 4
+                    ? "Varies based on network conditions"
+                    : FEE_PRESETS[feePreset].description}
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </TableContainer>
+
+        <Box sx={{ mt: 2, display: "flex", alignItems: "center" }}>
+          <Typography variant="caption" sx={{ mr: 1 }}>
+            Technical Details
+          </Typography>
+          <IconButton
+            size="small"
+            onClick={() => setShowTechnicalDetails(!showTechnicalDetails)}
+          >
+            <InfoIcon fontSize="small" />
+          </IconButton>
+        </Box>
+
+        {showTechnicalDetails && (
+          <Box sx={{ mt: 2, p: 2, bgcolor: "#f5f5f5", borderRadius: 1 }}>
+            <Typography
+              variant="caption"
+              component="div"
+              fontFamily="monospace"
+            >
+              Sequence Number (RBF): 0x{rbfSequence.toString(16)}
+              <br />
+              Version: {transaction.version || 2}
+              <br />
+              Inputs: 1<br />
+              Outputs: 2<br />
+              Locktime: {transaction.locktime || 0}
+            </Typography>
+          </Box>
+        )}
+      </Paper>
+
+      <Box mt={3} display="flex" justifyContent="flex-end">
+        <Button
+          variant="contained"
+          color="primary"
+          onClick={handleNext}
+          disabled={manualFeeRate < origFeeRate}
+        >
+          Next
+        </Button>
+      </Box>
+    </Box>
+  );
+
+  // Render the Review step with interactive transaction builder
+  const renderReview = () => (
+    <Box>
+      <Typography variant="h6" gutterBottom>
+        Transaction Preview and Verification
+      </Typography>
+
+      <Alert severity="info" sx={{ mb: 3 }}>
+        <Typography variant="body2">
+          Review the transaction details carefully. The replacement transaction
+          will have the same inputs and outputs as the original, but with a
+          higher fee taken from the change output.
+        </Typography>
+      </Alert>
+
+      <Paper sx={{ p: 3, mb: 3 }} variant="outlined">
+        <Box display="flex" justifyContent="space-between" mb={2}>
+          <Typography variant="subtitle1">Transaction Structure</Typography>
+
+          <Box>
+            <Button
+              variant="outlined"
+              size="small"
+              color="primary"
+              onClick={() => setShowTechnicalDetails(!showTechnicalDetails)}
+            >
+              {showTechnicalDetails ? "Hide Details" : "Show Details"}
+            </Button>
+          </Box>
+        </Box>
+
+        <Typography variant="subtitle2" gutterBottom sx={{ mt: 2 }}>
+          Original Transaction
+        </Typography>
+        <TransactionBox>
+          <Box mb={2}>
+            <Typography variant="caption" color="textSecondary">
+              Input
+            </Typography>
+            <InputBox>
+              <Typography variant="body2" fontFamily="monospace">
+                {txid.substring(0, 8)}...{txid.substring(txid.length - 8)}:
+                {vout}
+              </Typography>
+              <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                <Typography variant="caption" color="textSecondary">
+                  Sequence: 0x{rbfSequence.toString(16)}
+                </Typography>
+                <Typography variant="body2">
+                  {originalFee + txSize * 10} sats
+                </Typography>
+              </Box>
+            </InputBox>
+          </Box>
+
+          <Divider sx={{ my: 2 }}>
+            <Typography variant="caption" color="textSecondary">
+              Fee: {originalFee} sats ({origFeeRate.toFixed(1)} sat/vB)
+            </Typography>
+          </Divider>
+
+          <Typography variant="caption" color="textSecondary">
+            Outputs
+          </Typography>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            <OutputBox>
+              <Typography variant="body2" fontFamily="monospace">
+                Recipient: bc1q...{Math.floor(Math.random() * 10000)}
+              </Typography>
+              <Typography variant="body2">{txOutputAmount} sats</Typography>
+            </OutputBox>
+
+            <OutputBox isChange>
+              <Typography variant="body2" fontFamily="monospace">
+                Change: bc1q...{Math.floor(Math.random() * 10000)}
+              </Typography>
+              <Typography variant="body2">{txChangeAmount} sats</Typography>
+            </OutputBox>
+          </Box>
+        </TransactionBox>
+
+        <Typography variant="subtitle2" gutterBottom sx={{ mt: 3 }}>
+          Replacement Transaction (RBF)
+        </Typography>
+        <TransactionBox>
+          <Box mb={2}>
+            <Typography variant="caption" color="textSecondary">
+              Input (unchanged)
+            </Typography>
+            <InputBox>
+              <Typography variant="body2" fontFamily="monospace">
+                {txid.substring(0, 8)}...{txid.substring(txid.length - 8)}:
+                {vout}
+              </Typography>
+              <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                <Typography variant="caption" color="textSecondary">
+                  Sequence: 0x{rbfSequence.toString(16)}
+                </Typography>
+                <Typography variant="body2">
+                  {originalFee + txSize * 10} sats
+                </Typography>
+              </Box>
+            </InputBox>
+          </Box>
+
+          <Divider sx={{ my: 2 }}>
+            <Typography variant="body2" color="primary" fontWeight="medium">
+              New Fee: {getEstimatedFee()} sats ({getEffectiveFeeRate()} sat/vB)
+            </Typography>
+          </Divider>
+
+          <Typography variant="caption" color="textSecondary">
+            Outputs
+          </Typography>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            <OutputBox>
+              <Typography variant="body2" fontFamily="monospace">
+                Recipient: bc1q...{Math.floor(Math.random() * 10000)}{" "}
+                (unchanged)
+              </Typography>
+              <Typography variant="body2">{txOutputAmount} sats</Typography>
+            </OutputBox>
+
+            <OutputBox isChange>
+              <Typography variant="body2" fontFamily="monospace">
+                Change: bc1q...{Math.floor(Math.random() * 10000)} (reduced)
+              </Typography>
+              <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                <Typography variant="body2">{newChangeAmount} sats</Typography>
+                <Typography variant="caption" color="error">
+                  (-{getAdditionalFee()} sats)
+                </Typography>
+              </Box>
+            </OutputBox>
+          </Box>
+        </TransactionBox>
+
+        {showTechnicalDetails && (
+          <Box sx={{ mt: 3 }}>
+            <Typography variant="subtitle2" gutterBottom>
+              Technical Details
+            </Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Field</TableCell>
+                    <TableCell>Original Transaction</TableCell>
+                    <TableCell>Replacement Transaction</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  <TableRow>
+                    <TableCell>Version</TableCell>
+                    <TableCell>{transaction.version || 2}</TableCell>
+                    <TableCell>{transaction.version || 2}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Input Count</TableCell>
+                    <TableCell>1</TableCell>
+                    <TableCell>1</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Output Count</TableCell>
+                    <TableCell>2</TableCell>
+                    <TableCell>2</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Locktime</TableCell>
+                    <TableCell>{transaction.locktime || 0}</TableCell>
+                    <TableCell>{transaction.locktime || 0}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Input Sequence</TableCell>
+                    <TableCell>0x{rbfSequence.toString(16)}</TableCell>
+                    <TableCell>0x{rbfSequence.toString(16)}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Fee</TableCell>
+                    <TableCell>{originalFee} sats</TableCell>
+                    <TableCell>{getEstimatedFee()} sats</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Fee Rate</TableCell>
+                    <TableCell>{origFeeRate.toFixed(1)} sat/vB</TableCell>
+                    <TableCell>{getEffectiveFeeRate()} sat/vB</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Box>
+        )}
+      </Paper>
+
+      <Paper sx={{ p: 3, mb: 3 }} variant="outlined">
+        <Typography variant="subtitle1" gutterBottom>
+          RBF Rules Verification
+        </Typography>
+        <TableContainer>
+          <Table size="small">
+            <TableBody>
+              <TableRow>
+                <TableCell component="th" scope="row">
+                  <Tooltip title="RBF requires the sequence number to be less than 0xFFFFFFFE">
+                    <Box display="flex" alignItems="center">
+                      <Typography variant="body2">
+                        Input is RBF signaled
+                      </Typography>
+                      <InfoIcon fontSize="small" sx={{ ml: 1 }} />
+                    </Box>
+                  </Tooltip>
+                </TableCell>
+                <TableCell>
+                  {rbfSequence < 0xfffffffe ? (
+                    <Typography variant="body2" color="success.main">
+                      Pass
+                    </Typography>
+                  ) : (
+                    <Typography variant="body2" color="error.main">
+                      Fail
+                    </Typography>
+                  )}
+                </TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell component="th" scope="row">
+                  <Tooltip title="The replacement transaction must pay a higher fee than the original">
+                    <Box display="flex" alignItems="center">
+                      <Typography variant="body2">
+                        Fee is higher than original
+                      </Typography>
+                      <InfoIcon fontSize="small" sx={{ ml: 1 }} />
+                    </Box>
+                  </Tooltip>
+                </TableCell>
+                <TableCell>
+                  {getEstimatedFee() > originalFee ? (
+                    <Typography variant="body2" color="success.main">
+                      Pass (+{getAdditionalFee()} sats)
+                    </Typography>
+                  ) : (
+                    <Typography variant="body2" color="error.main">
+                      Fail
+                    </Typography>
+                  )}
+                </TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell component="th" scope="row">
+                  <Tooltip title="All original outputs must be preserved at the same or higher amounts">
+                    <Box display="flex" alignItems="center">
+                      <Typography variant="body2">
+                        Original recipient outputs preserved
+                      </Typography>
+                      <InfoIcon fontSize="small" sx={{ ml: 1 }} />
+                    </Box>
+                  </Tooltip>
+                </TableCell>
+                <TableCell>
+                  <Typography variant="body2" color="success.main">
+                    Pass
+                  </Typography>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Paper>
+
+      <Alert severity="warning" sx={{ mb: 3 }}>
+        <AlertTitle>Important</AlertTitle>
+        <Typography variant="body2">
+          Once submitted, this acceleration transaction cannot be canceled. Your
+          original transaction will be replaced by this new one with a higher
+          fee.
+        </Typography>
+      </Alert>
+
+      <Box display="flex" justifyContent="space-between">
+        <Button onClick={handleBack}>Back</Button>
+        <Button
+          variant="contained"
+          color="primary"
+          onClick={handleCreateTransaction}
+          disabled={loading}
+          startIcon={loading ? <CircularProgress size={20} /> : null}
+        >
+          {loading ? "Creating Transaction..." : "Sign & Broadcast Transaction"}
+        </Button>
+      </Box>
+    </Box>
+  );
+
+  // Render the Completion step
+  const renderComplete = () => (
+    <Box>
+      <Paper sx={{ p: 4, mb: 3, textAlign: "center" }} variant="outlined">
+        <Box
+          sx={{
+            width: 60,
+            height: 60,
+            borderRadius: "50%",
+            bgcolor: "success.light",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            mx: "auto",
+            mb: 2,
+          }}
+        >
+          <CheckCircleIcon sx={{ color: "success.main", fontSize: 36 }} />
+        </Box>
+        <Typography variant="h5" gutterBottom>
+          Transaction Successfully Broadcast
+        </Typography>
+        <Typography variant="body1" color="textSecondary" sx={{ mb: 3 }}>
+          Your accelerated transaction has been broadcast to the network.
+        </Typography>
+
+        <Divider sx={{ my: 3 }} />
+
+        <Box sx={{ textAlign: "left", mt: 3 }}>
+          <Typography variant="subtitle1" gutterBottom>
+            Transaction Summary
+          </Typography>
+          <TableContainer>
+            <Table size="small">
+              <TableBody>
+                <TableRow>
+                  <TableCell component="th" scope="row">
+                    Method
+                  </TableCell>
+                  <TableCell>Replace-By-Fee (RBF)</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell component="th" scope="row">
+                    Original Fee Rate
+                  </TableCell>
+                  <TableCell>{origFeeRate.toFixed(1)} sat/vB</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell component="th" scope="row">
+                    New Fee Rate
+                  </TableCell>
+                  <TableCell>{getEffectiveFeeRate()} sat/vB</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell component="th" scope="row">
+                    Fee Increase
+                  </TableCell>
+                  <TableCell>{getAdditionalFee()} sats</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell component="th" scope="row">
+                    Expected Confirmation
+                  </TableCell>
+                  <TableCell>
+                    {feePreset === 4
+                      ? "Varies based on network conditions"
+                      : FEE_PRESETS[feePreset].description}
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+      </Paper>
+
+      <Box display="flex" justifyContent="center">
+        <Button variant="contained" color="primary" onClick={onComplete}>
+          Return to Transactions
+        </Button>
+      </Box>
+    </Box>
+  );
+
+  // Return the appropriate component based on the active step
+  const getStepContent = (step) => {
+    switch (step) {
+      case 0:
+        return renderConfigureFee();
+      case 1:
+        return renderReview();
+      case 2:
+        return renderComplete();
       default:
-        return <div>Unknown step</div>;
+        return "Unknown step";
     }
   };
 
   return (
-    <Box className={classes.section}>
-      <Stepper activeStep={activeStep} className={classes.stepper}>
-        {STEPS.map((label) => (
+    <Box>
+      <Stepper activeStep={activeStep} sx={{ mb: 4 }}>
+        {steps.map((label) => (
           <Step key={label}>
             <StepLabel>{label}</StepLabel>
           </Step>
         ))}
       </Stepper>
 
-      {renderStepContent()}
+      {getStepContent(activeStep)}
     </Box>
   );
-};
-
-RBFOptions.propTypes = {
-  transaction: PropTypes.shape({
-    txid: PropTypes.string.isRequired,
-    hex: PropTypes.string.isRequired,
-  }).isRequired,
-  analysis: PropTypes.shape({
-    fee: PropTypes.string.isRequired,
-    feeRate: PropTypes.number.isRequired,
-    vsize: PropTypes.number.isRequired,
-    estimatedRBFFee: PropTypes.string.isRequired,
-    addressType: PropTypes.string,
-    requiredSigners: PropTypes.number,
-    totalSigners: PropTypes.number,
-  }).isRequired,
-  client: PropTypes.shape({
-    type: PropTypes.string.isRequired,
-  }).isRequired,
-  network: PropTypes.string.isRequired,
 };
 
 export default RBFOptions;

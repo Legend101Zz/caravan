@@ -48,7 +48,7 @@ class WalletControl extends React.Component {
               value={WALLET_MODES.TRANSACTIONS}
               key={3}
             />,
-            <Tab label="Accelerate" value={WALLET_MODES.ACCELERATE} key={4} />, // New tab
+            // <Tab label="Accelerate" value={WALLET_MODES.ACCELERATE} key={4} />, // New tab
           ]}
         </Tabs>
         <Box mt={2}>{this.renderModeComponent()}</Box>

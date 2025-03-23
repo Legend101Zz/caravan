@@ -1,3 +1,5 @@
+// apps/coordinator/src/components/Wallet/TransactionsTable.tsx
+
 import React, { useState } from "react";
 import {
   Table,
@@ -15,10 +17,12 @@ import {
   Typography,
   Alert,
   Snackbar,
+  Button,
 } from "@mui/material";
 import { satoshisToBitcoins } from "@caravan/bitcoin";
 import { formatDistanceToNow } from "date-fns";
 import { OpenInNew } from "@mui/icons-material";
+import SpeedIcon from "@mui/icons-material/Speed";
 
 interface TransactionTableProps {
   transactions: Transaction[];
@@ -27,6 +31,9 @@ interface TransactionTableProps {
   sortDirection: "asc" | "desc";
   network?: string;
   onClickTransaction?: (txid: string) => void;
+  expandedTx?: string | null;
+  onRowClick?: (txid: string) => void;
+  onAccelerateClick?: (tx: Transaction) => void;
 }
 
 // How our Transaction should look like
@@ -39,6 +46,7 @@ interface Transaction {
   };
   size: number;
   fee: number;
+  network?: string;
 }
 
 // Helper function to format the relative time
@@ -54,7 +62,7 @@ const columns = [
   { id: "size", label: "Size (vBytes)", sortable: true },
   { id: "fee", label: "Fee (sats)", sortable: true },
   { id: "status", label: "Status", sortable: false },
-  { id: "actions", label: "", sortable: false },
+  { id: "actions", label: "Actions", sortable: false },
 ];
 
 // FeeDisplay component to display fees display in both sats and BTC
@@ -96,6 +104,9 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
   sortDirection,
   network,
   onClickTransaction,
+  expandedTx,
+  onRowClick,
+  onAccelerateClick,
 }) => {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
 
@@ -129,7 +140,15 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
 
   // Rendering a single transaction row
   const renderTransactionRow = (tx: Transaction) => (
-    <TableRow>
+    <TableRow
+      key={tx.txid}
+      hover
+      onClick={() => onRowClick?.(tx.txid)}
+      sx={{
+        cursor: "pointer",
+        backgroundColor: expandedTx === tx.txid ? "action.selected" : "inherit",
+      }}
+    >
       <TableCell>
         <Tooltip title={tx.txid}>
           <Chip
@@ -164,13 +183,30 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
         />
       </TableCell>
       <TableCell>
+        {!tx.status.confirmed && (
+          <Tooltip title="Speed up this transaction with a higher fee">
+            <Button
+              variant="outlined"
+              size="small"
+              color="primary"
+              startIcon={<SpeedIcon />}
+              onClick={(e) => {
+                e.stopPropagation(); // Prevent row click
+                onAccelerateClick?.(tx);
+              }}
+              sx={{ mr: 1 }}
+            >
+              Accelerate
+            </Button>
+          </Tooltip>
+        )}
+
         {network && (
-          <Tooltip title="View in your preferred block explorer">
+          <Tooltip title="View in block explorer">
             <IconButton
               size="small"
               onClick={(e) => {
                 e.stopPropagation();
-                // Let parent handle block explorer navigation
                 onClickTransaction?.(tx.txid);
               }}
             >
