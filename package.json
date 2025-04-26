@@ -27,7 +27,8 @@
     "vitest": "^3.1.1"
   },
   "dependencies": {
-    "@ledgerhq/hw-transport-webusb": "6.27.12"
+    "@ledgerhq/hw-transport-webusb": "6.27.12",
+    "recharts": "^2.15.3"
   },
   "engines": {
     "node": ">=20"

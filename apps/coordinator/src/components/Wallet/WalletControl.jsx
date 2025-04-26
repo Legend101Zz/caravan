@@ -18,6 +18,8 @@ import WalletDeposit from "./WalletDeposit";
 import WalletSpend from "./WalletSpend";
 import TransactionsTab from "./TransactionsTab/index";
 import { SlicesTableContainer } from "../Slices";
+import UTXOOptimizer from "./UTXOOptimizer";
+import WalletHealthDashboard from "./WalletHealthDashboard";
 
 class WalletControl extends React.Component {
   scrollRef = React.createRef();
@@ -47,6 +49,7 @@ class WalletControl extends React.Component {
               value={WALLET_MODES.TRANSACTIONS}
               key={3}
             />,
+            <Tab label="Health" value={WALLET_MODES.HEALTH} key={4} />,
           ]}
         </Tabs>
         <Box mt={2}>{this.renderModeComponent()}</Box>
@@ -63,6 +66,8 @@ class WalletControl extends React.Component {
       if (walletMode === WALLET_MODES.VIEW) return <SlicesTableContainer />;
       if (walletMode === WALLET_MODES.TRANSACTIONS)
         return <TransactionsTab refreshWallet={this.props.refreshNodes} />;
+      if (walletMode === WALLET_MODES.HEALTH)
+        return this.renderWalletHealthDashboard();
     }
     const progress = this.progress();
     return [
@@ -71,6 +76,145 @@ class WalletControl extends React.Component {
       </div>,
       <LinearProgress variant="determinate" value={progress} key={1} />,
     ];
+  };
+
+  renderWalletHealthDashboard = () => {
+    const {
+      deposits,
+      change,
+      client,
+      signatureImporters,
+      network,
+      addressType,
+    } = this.props;
+
+    // Prepare the data for the health dashboard
+    const inputData = {
+      network,
+      addressType,
+      walletAddresses: this.getWalletAddresses(),
+      transactions: this.getAllTransactions(),
+      utxos: this.getAllUTXOs(),
+    };
+
+    return <WalletHealthDashboard {...inputData} />;
+  };
+
+  getWalletAddresses = () => {
+    const { deposits, change } = this.props;
+    const addresses = [];
+
+    // Extract deposit addresses
+    Object.values(deposits.nodes || {}).forEach((node) => {
+      if (node.multisig && node.multisig.address) {
+        addresses.push(node.multisig.address);
+      }
+    });
+
+    // Extract change addresses
+    Object.values(change.nodes || {}).forEach((node) => {
+      if (node.multisig && node.multisig.address) {
+        addresses.push(node.multisig.address);
+      }
+    });
+
+    return addresses;
+  };
+
+  getAllTransactions = () => {
+    const { deposits, change } = this.props;
+    const transactions = [];
+
+    // Process all nodes to find transactions
+    const allNodes = [
+      ...Object.values(deposits.nodes || {}),
+      ...Object.values(change.nodes || {}),
+    ];
+
+    allNodes.forEach((node) => {
+      if (node.utxos && node.utxos.length > 0) {
+        node.utxos.forEach((utxo) => {
+          if (!transactions.some((tx) => tx.txid === utxo.txid)) {
+            transactions.push({
+              txid: utxo.txid,
+              vout: [
+                {
+                  scriptPubkeyAddress: node.multisig.address,
+                  value: parseFloat(utxo.amount),
+                },
+              ],
+              vin: [],
+              status: {
+                confirmed: utxo.confirmed,
+                blockTime: utxo.time,
+              },
+              value: parseFloat(utxo.amount),
+              valueToWallet: parseFloat(utxo.amount),
+              size: 0,
+              weight: 0,
+              fee: 0,
+              isReceived: true,
+              isSend: false,
+            });
+          }
+        });
+      }
+    });
+
+    return transactions;
+  };
+
+  getAllUTXOs = () => {
+    const { deposits, change } = this.props;
+    const addressUtxos = {};
+
+    // Process deposit UTXOs
+    Object.values(deposits.nodes || {}).forEach((node) => {
+      if (
+        node.multisig &&
+        node.multisig.address &&
+        node.utxos &&
+        node.utxos.length > 0
+      ) {
+        const address = node.multisig.address;
+        addressUtxos[address] = (addressUtxos[address] || []).concat(
+          node.utxos.map((utxo) => ({
+            txid: utxo.txid,
+            vout: utxo.index,
+            value: parseFloat(utxo.amount),
+            status: {
+              confirmed: utxo.confirmed,
+              block_time: utxo.time || Math.floor(Date.now() / 1000),
+            },
+          })),
+        );
+      }
+    });
+
+    // Process change UTXOs
+    Object.values(change.nodes || {}).forEach((node) => {
+      if (
+        node.multisig &&
+        node.multisig.address &&
+        node.utxos &&
+        node.utxos.length > 0
+      ) {
+        const address = node.multisig.address;
+        addressUtxos[address] = (addressUtxos[address] || []).concat(
+          node.utxos.map((utxo) => ({
+            txid: utxo.txid,
+            vout: utxo.index,
+            value: parseFloat(utxo.amount),
+            status: {
+              confirmed: utxo.confirmed,
+              block_time: utxo.time || Math.floor(Date.now() / 1000),
+            },
+          })),
+        );
+      }
+    });
+
+    return addressUtxos;
   };
 
   progress = () => {
@@ -110,10 +254,12 @@ WalletControl.propTypes = {
   change: PropTypes.shape({
     trailingEmptyNodes: PropTypes.number,
     fetchUTXOsErrors: PropTypes.number,
+    nodes: PropTypes.shape({}),
   }).isRequired,
   deposits: PropTypes.shape({
     trailingEmptyNodes: PropTypes.number,
     fetchUTXOsErrors: PropTypes.number,
+    nodes: PropTypes.shape({}),
   }).isRequired,
   nodesLoaded: PropTypes.bool.isRequired,
   requiredSigners: PropTypes.number.isRequired,
@@ -123,14 +269,19 @@ WalletControl.propTypes = {
   updateNode: PropTypes.func.isRequired,
   walletMode: PropTypes.number.isRequired,
   refreshNodes: PropTypes.func.isRequired,
+  addressType: PropTypes.string.isRequired,
+  client: PropTypes.shape({}).isRequired,
 };
 
 function mapStateToProps(state) {
   return {
     ...state.wallet,
     ...state.wallet.common,
+    network: state.settings.network,
+    addressType: state.settings.addressType,
     requiredSigners: state.spend.transaction.requiredSigners,
     signatureImporters: state.spend.signatureImporters,
+    client: state.client,
   };
 }
 

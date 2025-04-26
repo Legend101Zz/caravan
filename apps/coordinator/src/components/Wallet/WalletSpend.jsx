@@ -39,6 +39,8 @@ import OutputsForm from "../ScriptExplorer/OutputsForm";
 import WalletSign from "./WalletSign";
 import TransactionPreview from "./TransactionPreview";
 import { bigNumberPropTypes } from "../../proptypes/utils";
+import HealthMetrics from "./HealthMetrics";
+import UTXOOptimizer from "./UTXOOptimizer";
 
 class WalletSpend extends React.Component {
   outputsAmount = new BigNumber(0);
@@ -94,6 +96,18 @@ class WalletSpend extends React.Component {
   showSignTransaction = () => {
     const { setSpendStep } = this.props;
     setSpendStep(SPEND_STEP_SIGN);
+  };
+
+  handleOptimizeUTXOs = (optimizedUtxos) => {
+    const { setInputs, resetNodesSpend } = this.props;
+
+    // Reset current selection
+    resetNodesSpend();
+
+    // Set the optimized UTXOs as inputs
+    if (optimizedUtxos.length > 0) {
+      setInputs(optimizedUtxos);
+    }
   };
 
   handleShowPreview = () => {
@@ -180,6 +194,8 @@ class WalletSpend extends React.Component {
       changeAddress,
       changeNode,
       updateNode,
+      changeNodes,
+      depositNodes,
       addNode,
       spendingStep,
       fee,
@@ -222,6 +238,40 @@ class WalletSpend extends React.Component {
                   <NodeSet addNode={addNode} updateNode={updateNode} />
                 </Box>
                 <OutputsForm />
+                {/* {spendingStep === SPEND_STEP_CREATE && (
+                  <>
+                    <Box mt={3}>
+                      <UTXOOptimizer
+                        availableUtxos={Object.values(depositNodes)
+                          .concat(Object.values(changeNodes))
+                          .flatMap((node) =>
+                            node.utxos
+                              ? node.utxos.map((utxo) => ({
+                                  ...utxo,
+                                  multisig: node.multisig,
+                                }))
+                              : [],
+                          )}
+                        targetAmount={outputs.reduce(
+                          (sum, output) => sum + parseFloat(output.amount || 0),
+                          0,
+                        )}
+                        feeRate={feeRate}
+                        onOptimize={this.handleOptimizeUTXOs}
+                      />
+                    </Box>
+
+                    {inputs.length > 0 && (
+                      <Box mt={3}>
+                        <HealthMetrics
+                          inputs={inputs}
+                          outputs={outputs}
+                          feeRate={feeRate}
+                        />
+                      </Box>
+                    )}
+                  </>
+                )} */}
                 <Box mt={2}>
                   <Button
                     onClick={this.handleShowPreview}
@@ -317,6 +367,7 @@ WalletSpend.propTypes = {
   updateAutoSpend: PropTypes.func.isRequired,
   updateNode: PropTypes.func.isRequired,
   importPSBT: PropTypes.func.isRequired,
+  setInputs: PropTypes.func.isRequired,
 };
 
 WalletSpend.defaultProps = {

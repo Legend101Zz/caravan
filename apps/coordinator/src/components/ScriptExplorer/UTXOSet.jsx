@@ -14,11 +14,15 @@ import {
   TableCell,
   Typography,
   Checkbox,
+  Box,
+  Chip,
 } from "@mui/material";
 import { OpenInNew } from "@mui/icons-material";
 import BigNumber from "bignumber.js";
 import { externalLink } from "utils/ExternalLink";
 import Copyable from "../Copyable";
+import HealthMetrics from "../Wallet/HealthMetrics";
+import UTXOOptimizer from "../Wallet/UTXOOptimizer";
 
 // Actions
 import { setInputs as setInputsAction } from "../../actions/transactionActions";
@@ -76,6 +80,31 @@ class UTXOSet extends React.Component {
       }
     }
   }
+
+  handleOptimizeUTXOs = (optimizedUtxos) => {
+    const { localInputs } = this.state;
+
+    // Reset all UTXOs to unchecked first
+    localInputs.forEach((input) => {
+      input.checked = false;
+    });
+
+    // Then mark the optimized ones as checked
+    optimizedUtxos.forEach((optimizedUtxo) => {
+      const matchingInput = localInputs.find(
+        (input) =>
+          input.txid === optimizedUtxo.txid &&
+          input.index === optimizedUtxo.index,
+      );
+
+      if (matchingInput) {
+        matchingInput.checked = true;
+      }
+    });
+
+    // Update inputs in the state and redux store
+    this.setInputsAndUpdateDisplay(localInputs);
+  };
 
   filterInputs = (localInputs, transactionStoreInputs, filterToMyInputs) => {
     return localInputs.filter((input) => {
@@ -170,6 +199,40 @@ class UTXOSet extends React.Component {
     }
   };
 
+  calculateUTXOHealth = (utxo) => {
+    // This is a simplified health calculation for individual UTXOs
+
+    let score = 50; // Start with a neutral score
+
+    // Age-based factors - older UTXOs are generally better for privacy
+    if (utxo.confirmed) {
+      const ageInDays = (Date.now() / 1000 - utxo.time) / (60 * 60 * 24);
+      if (ageInDays > 30)
+        score += 20; // Older than a month
+      else if (ageInDays > 7) score += 10; // Older than a week
+    } else {
+      score -= 10; // Unconfirmed UTXOs are less private
+    }
+
+    // Amount-based factors - round amounts are less private
+    const amount = parseFloat(utxo.amount);
+    const isRoundAmount =
+      amount === Math.floor(amount) ||
+      amount * 10 === Math.floor(amount * 10) ||
+      amount * 100 === Math.floor(amount * 100);
+
+    if (isRoundAmount) score -= 10;
+
+    // Dust factor - very small amounts might be dust
+    if (amount < 0.0001) score -= 20;
+
+    // Determine health level
+    if (score >= 80) return { level: "ideal", score, label: "Ideal" };
+    if (score >= 60) return { level: "good", score, label: "Good" };
+    if (score >= 40) return { level: "moderate", score, label: "Moderate" };
+    return { level: "avoid", score, label: "Avoid" };
+  };
+
   renderInputs = () => {
     const { network, showSelection, finalizedOutputs } = this.props;
     const { localInputs } = this.state;
@@ -178,6 +241,9 @@ class UTXOSet extends React.Component {
         input.confirmed ? "" : ` ${styles.unconfirmed}`
       }`;
       const confirmedTitle = input.confirmed ? "confirmed" : "unconfirmed";
+
+      // Calculate health for this UTXO
+      const health = this.calculateUTXOHealth(input);
       return (
         <TableRow hover key={input.txid}>
           {showSelection && (
@@ -202,6 +268,21 @@ class UTXOSet extends React.Component {
           </TableCell>
           <TableCell>
             <Copyable text={satoshisToBitcoins(input.amountSats)} />
+          </TableCell>
+          <TableCell>
+            <Chip
+              label={health.label}
+              color={
+                health.level === "ideal"
+                  ? "success"
+                  : health.level === "good"
+                    ? "primary"
+                    : health.level === "moderate"
+                      ? "warning"
+                      : "error"
+              }
+              size="small"
+            />
           </TableCell>
           <TableCell>
             {externalLink(
@@ -247,6 +328,7 @@ class UTXOSet extends React.Component {
               <TableCell>TXID</TableCell>
               <TableCell>Index</TableCell>
               <TableCell>Amount (BTC)</TableCell>
+              <TableCell>Health</TableCell>
               <TableCell>View</TableCell>
             </TableRow>
           </TableHead>
@@ -262,6 +344,33 @@ class UTXOSet extends React.Component {
             </TableRow>
           </TableFooter>
         </Table>
+        {localInputs.length > 0 && (
+          <>
+            <Box mt={3}>
+              <UTXOOptimizer
+                availableUtxos={localInputs}
+                targetAmount={
+                  this.state.outputs && this.state.outputs.length > 0
+                    ? this.state.outputs.reduce(
+                        (sum, output) => sum + parseFloat(output.amount || 0),
+                        0,
+                      )
+                    : 0
+                }
+                feeRate={this.state.feeRate}
+                onOptimize={this.handleOptimizeUTXOs}
+              />
+            </Box>
+
+            <Box mt={3}>
+              <HealthMetrics
+                inputs={this.state.inputs}
+                outputs={this.state.outputs || []}
+                feeRate={this.state.feeRate}
+              />
+            </Box>
+          </>
+        )}
       </>
     );
   }
@@ -300,6 +409,8 @@ UTXOSet.defaultProps = {
 function mapStateToProps(state) {
   return {
     ...state.settings,
+    outputs: state.spend.transaction.outputs,
+    feeRate: state.spend.transaction.feeRate,
     autoSpend: state.spend.transaction.autoSpend,
     finalizedOutputs: state.spend.transaction.finalizedOutputs,
     existingTransactionInputs: state.spend.transaction.inputs,
