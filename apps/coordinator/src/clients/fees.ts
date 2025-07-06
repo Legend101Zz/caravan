@@ -2,7 +2,7 @@ import { BlockchainClient } from "@caravan/clients";
 import { useQuery } from "@tanstack/react-query";
 import { useGetClient } from "hooks/client";
 
-enum FeePriority {
+export enum FeePriority {
   HIGH = "HIGH",
   MEDIUM = "MEDIUM",
   LOW = "LOW",
@@ -24,6 +24,20 @@ export const CONFIRMATION_TARGETS = {
   [FeePriority.LOW]: 6, // Within Next 6 blocks ~1 hour
 };
 
+/**
+ * Default fee rates for different priority levels (in sat/vB)
+ * Used as fallback when blockchain client fails
+ *
+ * Fallback values based on :
+ * https://b10c.me/blog/003-a-list-of-public-bitcoin-feerate-estimation-apis/
+ * These values are reasonable defaults but will be less accurate
+ */
+const DEFAULT_FEE_RATES = {
+  [FeePriority.HIGH]: 32.75,
+  [FeePriority.MEDIUM]: 32.75,
+  [FeePriority.LOW]: 20.09,
+};
+
 const feeEstimateKeys = {
   all: ["fees"] as const,
   feeEstimate: (priority: FeePriority) =>
@@ -34,7 +48,21 @@ const useGetFeeEstimate = async (
   priority: FeePriority,
   blockchainClient: BlockchainClient,
 ) => {
-  return await blockchainClient.getFeeEstimate(CONFIRMATION_TARGETS[priority]);
+  try {
+    const feeRate = await blockchainClient.getFeeEstimate(
+      CONFIRMATION_TARGETS[priority],
+    );
+
+    // Return default if the API call returns invalid data
+    if (!feeRate || isNaN(feeRate)) {
+      return DEFAULT_FEE_RATES[priority];
+    }
+
+    return Math.max(1, Math.ceil(feeRate)); // Ensure we have at least 1 sat/vB
+  } catch (error) {
+    console.error("Error fetching fee estimate:", error);
+    return DEFAULT_FEE_RATES[priority];
+  }
 };
 
 export const useFeeEstimate = (priority: FeePriority) => {
