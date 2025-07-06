@@ -34,8 +34,6 @@ import {
   setFeeBumpError,
   setFeeBumpRecommendation,
   setFeeBumpStrategy,
-  setFeeBumpRate,
-  setFeeBumpPriority,
   setFeeBumpResult,
   setRbfType,
   setCancelAddress,
@@ -45,12 +43,7 @@ import {
   FeeBumpActionTypes,
 } from "./feeBumpActions";
 
-import {
-  FeeBumpStatus,
-  FeeBumpRecommendation,
-  FeePriority,
-  FeeBumpResult,
-} from "../types";
+import { FeeBumpStatus, FeeBumpRecommendation, FeeBumpResult } from "../types";
 import {
   analyzeTransaction,
   extractUtxosForFeeBumping,
@@ -67,8 +60,6 @@ interface FeeBumpContextType {
     targetFeeRate?: number,
     initialTxHex?: string,
   ) => Promise<void>;
-  updateFeeRate: (feeRate: number) => void;
-  updateFeePriority: (priority: FeePriority) => Promise<void>;
   updateStrategy: (strategy: FeeBumpStrategy) => void;
   reset: () => void;
 
@@ -290,21 +281,6 @@ export function FeeBumpProvider({ children }: FeeBumpProviderProps) {
       await analyzeTx(tx, initialTxHex, targetFeeRate);
     },
     [analyzeTx],
-  );
-
-  const updateFeeRate = useCallback((feeRate: number) => {
-    dispatch(setFeeBumpRate(feeRate));
-  }, []);
-
-  const updateFeePriority = useCallback(
-    async (priority: FeePriority) => {
-      if (!state.transaction || !state.txHex) {
-        console.warn("Cannot update fee priority: No transaction selected");
-        return;
-      }
-      dispatch(setFeeBumpPriority(priority));
-    },
-    [state.transaction, state.txHex],
   );
 
   const updateStrategy = useCallback((strategy: FeeBumpStrategy) => {
@@ -656,8 +632,6 @@ export function FeeBumpProvider({ children }: FeeBumpProviderProps) {
     dispatch,
     // Core fee bumping operations
     setTransactionForBumping,
-    updateFeeRate,
-    updateFeePriority,
     updateStrategy,
     reset,
 
