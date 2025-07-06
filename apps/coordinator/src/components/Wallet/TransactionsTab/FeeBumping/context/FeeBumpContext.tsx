@@ -17,7 +17,7 @@ import {
   AcceleratedRbfOptions,
   CancelRbfOptions,
 } from "@caravan/fees";
-import { BlockchainClient } from "@caravan/clients";
+import { BlockchainClient, TransactionDetails } from "@caravan/clients";
 
 import { updateBlockchainClient } from "../../../../../actions/clientActions";
 import { selectWalletConfig } from "selectors/wallet";
@@ -62,14 +62,9 @@ interface FeeBumpContextType {
   state: FeeBumpingState;
   dispatch: React.Dispatch<FeeBumpActionTypes>;
   // Core fee bumping operations
-  analyzeTx: (
-    tx: any,
-    initialTxHex?: string,
-    priority?: FeePriority,
-  ) => Promise<void>;
   setTransactionForBumping: (
     tx: any,
-    priority?: FeePriority,
+    targetFeeRate?: number,
     initialTxHex?: string,
   ) => Promise<void>;
   updateFeeRate: (feeRate: number) => void;
@@ -205,11 +200,11 @@ export function FeeBumpProvider({ children }: FeeBumpProviderProps) {
 
   const analyzeTx = useCallback(
     async (
-      tx: any,
+      tx: TransactionDetails,
       initialTxHex: string = "",
-      priority: FeePriority = FeePriority.MEDIUM,
+      targetFeeRate?: number,
     ) => {
-      if (!tx) return;
+      if (!tx || !targetFeeRate) return;
 
       try {
         dispatch(setFeeBumpStatus(FeeBumpStatus.ANALYZING));
@@ -241,9 +236,8 @@ export function FeeBumpProvider({ children }: FeeBumpProviderProps) {
           tx.fee,
           network as Network,
           availableUtxos,
-          blockchainClient,
+          targetFeeRate,
           { requiredSigners, totalSigners, addressType },
-          priority,
         );
 
         // Create user-friendly recommendation
@@ -253,11 +247,11 @@ export function FeeBumpProvider({ children }: FeeBumpProviderProps) {
           canRBF: analysis.canRBF,
           canCPFP: analysis.canCPFP,
           suggestedRBFFeeRate: Math.max(
-            analysis.userSelectedFeeRate,
+            targetFeeRate,
             Number(analysis.estimatedRBFFee) / analysis.vsize,
           ),
           suggestedCPFPFeeRate: Math.max(
-            analysis.userSelectedFeeRate,
+            targetFeeRate,
             Number(analysis.estimatedCPFPFee) / analysis.vsize,
           ),
         };
@@ -288,13 +282,12 @@ export function FeeBumpProvider({ children }: FeeBumpProviderProps) {
 
   const setTransactionForBumping = useCallback(
     async (
-      tx: any,
-      priority: FeePriority = FeePriority.MEDIUM,
+      tx: TransactionDetails,
+      targetFeeRate?: number,
       initialTxHex: string = "",
     ) => {
       dispatch(setFeeBumpTransaction(tx, initialTxHex));
-      dispatch(setFeeBumpPriority(priority));
-      await analyzeTx(tx, initialTxHex, priority);
+      await analyzeTx(tx, initialTxHex, targetFeeRate);
     },
     [analyzeTx],
   );
@@ -662,7 +655,6 @@ export function FeeBumpProvider({ children }: FeeBumpProviderProps) {
     //dispatch
     dispatch,
     // Core fee bumping operations
-    analyzeTx,
     setTransactionForBumping,
     updateFeeRate,
     updateFeePriority,

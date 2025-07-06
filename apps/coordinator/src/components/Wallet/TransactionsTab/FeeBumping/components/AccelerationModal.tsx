@@ -24,8 +24,9 @@ import { ExpandLess, ExpandMore } from "@mui/icons-material";
 import CloseIcon from "@mui/icons-material/Close";
 import { FeeBumpStrategy } from "@caravan/fees";
 
-import { FeeBumpStatus, FeePriority } from "../types";
-import { downloadFile } from "../../../../../utils";
+import { FeeBumpStatus } from "../types";
+import { FeePriority, useFeeEstimate } from "clients/fees";
+import { downloadFile } from "utils";
 import { useFeeBumpState, useFeeBumpContext } from "../context";
 import { Transaction } from "../../types";
 import {
@@ -80,6 +81,7 @@ export const AccelerationModal: React.FC<AccelerationModalProps> = ({
     setPsbtVersion,
     isCreatingRBF,
   } = useFeeBumpContext();
+  const feeEstimateQuery = useFeeEstimate(FeePriority.MEDIUM);
 
   // Track the current step in the wizard
   const [activeStep, setActiveStep] = useState(0);
@@ -243,8 +245,12 @@ export const AccelerationModal: React.FC<AccelerationModalProps> = ({
     let isMounted = true;
 
     async function initializeTransaction() {
-      if (open && transaction && isMounted) {
-        await setTransactionForBumping(transaction, FeePriority.MEDIUM, txHex);
+      if (open && transaction && isMounted && feeEstimateQuery.data) {
+        await setTransactionForBumping(
+          transaction,
+          feeEstimateQuery.data,
+          txHex,
+        );
         if (isMounted) {
           setActiveStep(0);
           setDownloadClicked(false);
@@ -262,7 +268,14 @@ export const AccelerationModal: React.FC<AccelerationModalProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [open, transaction, txHex, setTransactionForBumping, reset]);
+  }, [
+    open,
+    transaction,
+    txHex,
+    setTransactionForBumping,
+    reset,
+    feeEstimateQuery.data,
+  ]);
 
   return (
     <Dialog
