@@ -12,61 +12,11 @@ import {
   UTXO as FeeUTXO,
   GlobalXpub,
   UTXO,
+  TxAnalysis,
 } from "@caravan/fees";
-import { FeePriority, FeeBumpRecommendation, PSBTFields } from "./types";
+import { PSBTFields } from "./types";
 import { TransactionT } from "../types";
 import { BlockchainClient } from "@caravan/clients";
-
-/**
- * Confirmation targets for fee estimation in blocks
- *
- * These values align with common confirmation targets used generally:
- * - HIGH: Next block (10 minutes)
- * - MEDIUM: ~3 blocks (30 minutes)
- * - LOW: ~6 blocks (1 hour)
- *
- * @see https://gist.github.com/morcos/d3637f015bc4e607e1fd10d8351e9f41
- */
-export const CONFIRMATION_TARGETS = {
-  HIGH: 1, // Next block (~10 min)
-  MEDIUM: 3, // Within Next 3 blocks ~30 min
-  LOW: 6, // Within Next 6 blocks ~1 hour
-};
-
-/**
- * Gets fee estimate from the blockchain client with fallback mechanisms
- *
- * This function retrieves fee estimates from the blockchain client and provides
- * fallback values if the API call fails. It ensures that we always have reasonable
- * fee values to work with as our fee-package needs a targetFeeRate it should target achieving
- *
- * @param blockchainClient - The initialized blockchain client
- * @param feeTarget - Target blocks for confirmation (default: 3)
- * @returns Promise resolving to fee rate in sat/vB
- */
-export const getFeeEstimate = async (
-  blockchainClient: BlockchainClient,
-  withinBlocks: number = CONFIRMATION_TARGETS.MEDIUM,
-): Promise<number> => {
-  try {
-    if (!blockchainClient) {
-      throw new Error("Blockchain client not initialized");
-    }
-
-    // Get fee estimate from the clients
-    const feeRate = await blockchainClient.getFeeEstimate(withinBlocks);
-    // Fallback values if the `getFeeEstimate` returns NaN
-    if (!feeRate) {
-      // Use default based on priority
-      return getDefaultFeeRate(withinBlocks);
-    }
-    return Math.max(1, Math.ceil(feeRate)); // Ensure we have at least 1 sat/vB
-  } catch (error) {
-    console.error("Error fetching fee estimate:", error);
-
-    return getDefaultFeeRate(withinBlocks);
-  }
-};
 
 /**
  * Identifies the change output in a transaction by analyzing output addresses
@@ -231,29 +181,13 @@ export const analyzeTransaction = async (
   fee: number,
   network: Network,
   availableUtxos: FeeUTXO[],
-  blockchainClient: BlockchainClient,
+  targetFeeRate: number,
   walletConfig: {
     requiredSigners: number;
     totalSigners: number;
     addressType: string;
   },
-  feePriority: FeePriority = FeePriority.MEDIUM,
-): Promise<FeeBumpRecommendation> => {
-  // Get fee estimates for different confirmation targets
-  const [highPriorityFee, mediumPriorityFee, lowPriorityFee] =
-    await Promise.all([
-      getFeeEstimate(blockchainClient, CONFIRMATION_TARGETS.HIGH),
-      getFeeEstimate(blockchainClient, CONFIRMATION_TARGETS.MEDIUM),
-      getFeeEstimate(blockchainClient, CONFIRMATION_TARGETS.LOW),
-    ]);
-
-  // Select target fee rate based on user priority
-  const targetFeeRate = selectTargetFeeRate(feePriority, {
-    high: highPriorityFee,
-    medium: mediumPriorityFee,
-    low: lowPriorityFee,
-  });
-
+): Promise<TxAnalysis> => {
   // Validate inputs
   validateTransactionInputs(txHex, fee, availableUtxos);
 
@@ -270,19 +204,7 @@ export const analyzeTransaction = async (
   });
 
   // Get comprehensive analysis
-  const analysis = analyzer.analyze();
-
-  // Return the analysis from the analyzer with added network fee estimates
-  return {
-    ...analysis,
-    networkFeeEstimates: {
-      highPriority: highPriorityFee,
-      mediumPriority: mediumPriorityFee,
-      lowPriority: lowPriorityFee,
-    },
-    userSelectedFeeRate: targetFeeRate, // Telling us the feeRate we can expect based on user selected no. of blocks to confirm
-    userSelectedPriority: feePriority, // Telling us which FeePriority user choosed
-  };
+  return analyzer.analyze();
 };
 
 // ============================================================================
@@ -899,58 +821,6 @@ const createRBFUtxo = (
     prevTxHex,
     ...additionalFields,
   };
-};
-
-/**
- * Default fee rates for different priority levels (in sat/vB)
- * Used as fallback when blockchain client fails
- *
- * Fallback values based on :
- * https://b10c.me/blog/003-a-list-of-public-bitcoin-feerate-estimation-apis/
- * These values are reasonable defaults but will be less accurate
- */
-const DEFAULT_FEE_RATES = {
-  HIGH: 32.75,
-  MEDIUM: 32.75,
-  LOW: 20.09,
-};
-
-/**
- * Gets default fee rate based on confirmation target
- *
- * Fallback values based on :
- * https://b10c.me/blog/003-a-list-of-public-bitcoin-feerate-estimation-apis/
- * These values are reasonable defaults but will be less accurate
- */
-const getDefaultFeeRate = (withinBlocks: number): number => {
-  switch (withinBlocks) {
-    case CONFIRMATION_TARGETS.HIGH:
-      return DEFAULT_FEE_RATES.HIGH;
-    case CONFIRMATION_TARGETS.MEDIUM:
-      return DEFAULT_FEE_RATES.MEDIUM;
-    case CONFIRMATION_TARGETS.LOW:
-      return DEFAULT_FEE_RATES.LOW;
-    default:
-      return DEFAULT_FEE_RATES.MEDIUM;
-  }
-};
-
-/**
- * Selects target fee rate based on priority
- */
-const selectTargetFeeRate = (
-  priority: FeePriority,
-  feeRates: { high: number; medium: number; low: number },
-): number => {
-  switch (priority) {
-    case FeePriority.HIGH:
-      return feeRates.high;
-    case FeePriority.LOW:
-      return feeRates.low;
-    case FeePriority.MEDIUM:
-    default:
-      return feeRates.medium;
-  }
 };
 
 /**
