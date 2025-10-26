@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.14.1
+
+### Patch Changes
+
+- [#398](https://github.com/caravan-bitcoin/caravan/pull/398) [`c68e10b`](https://github.com/caravan-bitcoin/caravan/commit/c68e10befdb5d973e9b1c2b68f788802761f8166) Thanks [@ChayanDass](https://github.com/ChayanDass)! - Fix footer position so it sticks to the bottom on short pages and moves down naturally on long pages.
+
 ## 1.14.0
 
 ### Minor Changes
